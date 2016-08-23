@@ -14,7 +14,8 @@ func NewNvidiaGPU() (*NvidiaGPU, error) {
 func (self *NvidiaGPU) GetGPUDeviceInfo() ([]gputypes.GPUDeviceInfo, error) {
 	return []gputypes.GPUDeviceInfo{
 		gputypes.GPUDeviceInfo{
-			Name:            "gpu0",
+			Name:            "nvidia-gpu-0",
+			Path:            "/dev/nvidia0",
 			TotalMemory:     4096,
 			AvailableMemory: 3500,
 		},

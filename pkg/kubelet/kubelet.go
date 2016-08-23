@@ -311,7 +311,7 @@ func NewMainKubelet(
 
 	nvidiaGPUProbe, err := gpunvidia.NewNvidiaGPU()
 	if err != nil {
-		glog.Errorf("Error creating nvidia GPU probe: %v", err)
+		glog.Errorf("Error creating nvidia GPU probe: %s", err)
 		nvidiaGPUProbe = nil
 	}
 
@@ -1427,6 +1427,15 @@ func (kl *Kubelet) GeneratePodHostNameAndDomain(pod *api.Pod) (string, string, e
 	return hostname, hostDomain, nil
 }
 
+func (kl *Kubelet) allocateGPUDevices(container *api.Container) ([]kubecontainer.DeviceInfo, error) {
+	_, err := kl.gpuProbe.GetGPUDeviceInfo()
+	if err != nil {
+		return nil, fmt.Errorf("Error getting GPU device info: %s", err)
+	}
+	// Check memory constraint
+	return nil, nil
+}
+
 // GenerateRunContainerOptions generates the RunContainerOptions, which can be used by
 // the container runtime to set parameters for launching a container.
 func (kl *Kubelet) GenerateRunContainerOptions(pod *api.Pod, container *api.Container, podIP string) (*kubecontainer.RunContainerOptions, error) {
@@ -1472,6 +1481,14 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *api.Pod, container *api.Cont
 	opts.DNS, opts.DNSSearch, err = kl.GetClusterDNS(pod)
 	if err != nil {
 		return nil, err
+	}
+
+	// Allocate GPU devices
+	if container.Resources.Requests.NvidiaGPUMemory().Value() > 0 {
+		opts.Devices, err = kl.allocateGPUDevices(container)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return opts, nil
@@ -3016,17 +3033,22 @@ func (kl *Kubelet) updateCloudProviderFromMachineInfo(node *api.Node, info *cadv
 
 func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 	// Get nvidia GPU devices info
-	gpuDeviceInfo, err := kl.gpuProbe.GetGPUDeviceInfo()
-	if err != nil {
-		glog.Errorf("Error getting nvidia GPU device info: %v", err)
-		gpuDeviceInfo = nil
-	}
-	var totalGPUMemoryOnNode int64
-	if len(gpuDeviceInfo) > 0 {
-		for _, info := range gpuDeviceInfo {
-			totalGPUMemoryOnNode += info.TotalMemory
+	var gpuDeviceInfo []gputypes.GPUDeviceInfo
+	var err error
+	if kl.gpuProbe != nil {
+		gpuDeviceInfo, err = kl.gpuProbe.GetGPUDeviceInfo()
+		if err != nil {
+			glog.Errorf("Error getting nvidia GPU device info: %v", err)
+			gpuDeviceInfo = nil
 		}
 	}
+	var totalGPUMemoryOnNode int64
+	for _, info := range gpuDeviceInfo {
+		totalGPUMemoryOnNode += info.TotalMemory
+	}
+	// unit from MB to B
+	totalGPUMemoryOnNode = totalGPUMemoryOnNode * 1024 * 1024
+	totalGPUOnNode := int64(len(gpuDeviceInfo))
 
 	// TODO: Post NotReady if we cannot get MachineInfo from cAdvisor. This needs to start
 	// cAdvisor locally, e.g. for test-cmd.sh, and in integration test.
@@ -3038,10 +3060,10 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 			api.ResourceCPU:             *resource.NewMilliQuantity(0, resource.DecimalSI),
 			api.ResourceMemory:          resource.MustParse("0Gi"),
 			api.ResourcePods:            *resource.NewQuantity(int64(kl.maxPods), resource.DecimalSI),
-			api.ResourceNvidiaGPU:       *resource.NewQuantity(int64(len(gpuDeviceInfo)), resource.DecimalSI),
-			api.ResourceNvidiaGPUMemory: *resource.NewQuantity(totalGPUMemoryOnNode, resource.DecimalSI),
+			api.ResourceNvidiaGPU:       *resource.NewQuantity(totalGPUOnNode, resource.DecimalSI),
+			api.ResourceNvidiaGPUMemory: *resource.NewQuantity(totalGPUMemoryOnNode, resource.BinarySI),
 		}
-		glog.Errorf("Error getting machine info: %v", err)
+		glog.Errorf("Error getting machine info: %s", err)
 	} else {
 		node.Status.NodeInfo.MachineID = info.MachineID
 		node.Status.NodeInfo.SystemUUID = info.SystemUUID
@@ -3054,7 +3076,7 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 				int64(kl.maxPods), resource.DecimalSI)
 		}
 		node.Status.Capacity[api.ResourceNvidiaGPU] = *resource.NewQuantity(
-			int64(len(gpuDeviceInfo)), resource.DecimalSI)
+			totalGPUOnNode, resource.DecimalSI)
 		node.Status.Capacity[api.ResourceNvidiaGPUMemory] = *resource.NewQuantity(
 			totalGPUMemoryOnNode, resource.DecimalSI)
 		if node.Status.NodeInfo.BootID != "" &&

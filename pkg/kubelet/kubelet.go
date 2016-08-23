@@ -56,6 +56,8 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/dockertools"
 	"k8s.io/kubernetes/pkg/kubelet/envvars"
 	"k8s.io/kubernetes/pkg/kubelet/eviction"
+	gpunvidia "k8s.io/kubernetes/pkg/kubelet/gpu/nvidia"
+	gputypes "k8s.io/kubernetes/pkg/kubelet/gpu/types"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
 	"k8s.io/kubernetes/pkg/kubelet/metrics"
 	"k8s.io/kubernetes/pkg/kubelet/network"
@@ -219,7 +221,6 @@ func NewMainKubelet(
 	reconcileCIDR bool,
 	maxPods int,
 	podsPerCore int,
-	nvidiaGPUs int,
 	dockerExecHandler dockertools.ExecHandler,
 	resolverConfig string,
 	cpuCFSQuota bool,
@@ -308,6 +309,12 @@ func NewMainKubelet(
 		flannelExperimentalOverlay = false
 	}
 
+	nvidiaGPUProbe, err := gpunvidia.NewNvidiaGPU()
+	if err != nil {
+		glog.Errorf("Error creating nvidia GPU probe: %v", err)
+		nvidiaGPUProbe = nil
+	}
+
 	klet := &Kubelet{
 		hostname:                       hostname,
 		nodeName:                       nodeName,
@@ -346,7 +353,7 @@ func NewMainKubelet(
 		reconcileCIDR:              reconcileCIDR,
 		maxPods:                    maxPods,
 		podsPerCore:                podsPerCore,
-		nvidiaGPUs:                 nvidiaGPUs,
+		gpuProbe:                   nvidiaGPUProbe,
 		syncLoopMonitor:            atomic.Value{},
 		resolverConfig:             resolverConfig,
 		cpuCFSQuota:                cpuCFSQuota,
@@ -755,8 +762,8 @@ type Kubelet struct {
 	// Maximum Number of Pods which can be run by this Kubelet
 	maxPods int
 
-	// Number of NVIDIA GPUs on this node
-	nvidiaGPUs int
+	// To probe GPUs on this node
+	gpuProbe gputypes.GPUProbe
 
 	// Monitor Kubelet's sync loop
 	syncLoopMonitor atomic.Value
@@ -3008,6 +3015,19 @@ func (kl *Kubelet) updateCloudProviderFromMachineInfo(node *api.Node, info *cadv
 }
 
 func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
+	// Get nvidia GPU devices info
+	gpuDeviceInfo, err := kl.gpuProbe.GetGPUDeviceInfo()
+	if err != nil {
+		glog.Errorf("Error getting nvidia GPU device info: %v", err)
+		gpuDeviceInfo = nil
+	}
+	var totalGPUMemoryOnNode int64
+	if len(gpuDeviceInfo) > 0 {
+		for _, info := range gpuDeviceInfo {
+			totalGPUMemoryOnNode += info.TotalMemory
+		}
+	}
+
 	// TODO: Post NotReady if we cannot get MachineInfo from cAdvisor. This needs to start
 	// cAdvisor locally, e.g. for test-cmd.sh, and in integration test.
 	info, err := kl.GetCachedMachineInfo()
@@ -3015,10 +3035,11 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 		// TODO(roberthbailey): This is required for test-cmd.sh to pass.
 		// See if the test should be updated instead.
 		node.Status.Capacity = api.ResourceList{
-			api.ResourceCPU:       *resource.NewMilliQuantity(0, resource.DecimalSI),
-			api.ResourceMemory:    resource.MustParse("0Gi"),
-			api.ResourcePods:      *resource.NewQuantity(int64(kl.maxPods), resource.DecimalSI),
-			api.ResourceNvidiaGPU: *resource.NewQuantity(int64(kl.nvidiaGPUs), resource.DecimalSI),
+			api.ResourceCPU:             *resource.NewMilliQuantity(0, resource.DecimalSI),
+			api.ResourceMemory:          resource.MustParse("0Gi"),
+			api.ResourcePods:            *resource.NewQuantity(int64(kl.maxPods), resource.DecimalSI),
+			api.ResourceNvidiaGPU:       *resource.NewQuantity(int64(len(gpuDeviceInfo)), resource.DecimalSI),
+			api.ResourceNvidiaGPUMemory: *resource.NewQuantity(totalGPUMemoryOnNode, resource.DecimalSI),
 		}
 		glog.Errorf("Error getting machine info: %v", err)
 	} else {
@@ -3033,7 +3054,9 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 				int64(kl.maxPods), resource.DecimalSI)
 		}
 		node.Status.Capacity[api.ResourceNvidiaGPU] = *resource.NewQuantity(
-			int64(kl.nvidiaGPUs), resource.DecimalSI)
+			int64(len(gpuDeviceInfo)), resource.DecimalSI)
+		node.Status.Capacity[api.ResourceNvidiaGPUMemory] = *resource.NewQuantity(
+			totalGPUMemoryOnNode, resource.DecimalSI)
 		if node.Status.NodeInfo.BootID != "" &&
 			node.Status.NodeInfo.BootID != info.BootID {
 			// TODO: This requires a transaction, either both node status is updated

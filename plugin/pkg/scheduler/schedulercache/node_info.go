@@ -122,6 +122,8 @@ func (n *NodeInfo) addPod(pod *api.Pod) {
 	n.requestedResource.Memory += mem
 	n.requestedResource.NvidiaGPU += nvidia_gpu
 	n.requestedResource.TotalNvidiaGPUMemory += nvidia_gpu_memory
+	n.nonzeroRequest.NvidiaGPU += nvidia_gpu
+	n.nonzeroRequest.TotalNvidiaGPUMemory += nvidia_gpu_memory
 	n.nonzeroRequest.MilliCPU += non0_cpu
 	n.nonzeroRequest.Memory += non0_mem
 	n.pods = append(n.pods, pod)
@@ -150,7 +152,8 @@ func (n *NodeInfo) removePod(pod *api.Pod) error {
 			n.requestedResource.Memory -= mem
 			n.requestedResource.NvidiaGPU -= nvidia_gpu
 			n.requestedResource.TotalNvidiaGPUMemory -= nvidia_gpu_memory
-
+			n.nonzeroRequest.NvidiaGPU -= nvidia_gpu
+			n.nonzeroRequest.TotalNvidiaGPUMemory -= nvidia_gpu_memory
 			n.nonzeroRequest.MilliCPU -= non0_cpu
 			n.nonzeroRequest.Memory -= non0_mem
 			return nil

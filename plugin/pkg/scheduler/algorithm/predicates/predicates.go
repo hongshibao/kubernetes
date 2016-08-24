@@ -459,7 +459,7 @@ func PodFitsResources(pod *api.Pod, nodeInfo *schedulercache.NodeInfo) (bool, er
 	totalNvidiaGPU := allocatable.NvidiaGPU().Value()
 	// These GPU memory are current free GPU memory, which are dynamic values
 	totalNvidiaGPUMemory := allocatable.NvidiaGPUMemory().Value()
-	//memoryOfEachNvidiaGPU := allocatable.MemoryOfEachNvidiaGPU()
+	memoryOfEachNvidiaGPU := allocatable.MemoryOfEachNvidiaGPU()
 
 	if totalMilliCPU < podRequest.milliCPU+nodeInfo.RequestedResource().MilliCPU {
 		return false,
@@ -477,6 +477,20 @@ func PodFitsResources(pod *api.Pod, nodeInfo *schedulercache.NodeInfo) (bool, er
 	if totalNvidiaGPUMemory < podRequest.nvidiaGPUMemory {
 		return false,
 			newInsufficientResourceError(nvidiaGpuResourceName, podRequest.nvidiaGPUMemory, 0, totalNvidiaGPUMemory)
+	}
+	// Assume allocate all containers in this pod to the same GPU
+	// Choose the GPU with most GPU memory to assign
+	// TODO handle multiple containers in one pod with better strategies
+	var maxMemInt64 int64
+	for _, mem := range memoryOfEachNvidiaGPU {
+		memInt64 := (*mem).Value()
+		if memInt64 > maxMemInt64 {
+			maxMemInt64 = memInt64
+		}
+	}
+	if maxMemInt64 < podRequest.nvidiaGPUMemory {
+		return false,
+			newInsufficientResourceError(nvidiaGpuResourceName, podRequest.nvidiaGPUMemory, 0, maxMemInt64)
 	}
 	glog.V(10).Infof("Schedule Pod %+v on Node %+v is allowed, Node is running only %v out of %v Pods.",
 		podName(pod), node.Name, len(nodeInfo.Pods()), allowedPodNumber)

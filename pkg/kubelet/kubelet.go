@@ -3042,12 +3042,18 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 			gpuDeviceInfo = nil
 		}
 	}
+	availableMemoryPerGPU := make(map[string]int64)
 	var totalGPUMemoryOnNode int64
+	var totalAvailableGPUMemoryOnNode int64
 	for _, info := range gpuDeviceInfo {
 		totalGPUMemoryOnNode += info.TotalMemory
+		totalAvailableGPUMemoryOnNode += info.AvailableMemory
+		// unit from MB to B
+		availableMemoryPerGPU[info.Path] = info.AvailableMemory * 1024 * 1024
 	}
 	// unit from MB to B
 	totalGPUMemoryOnNode = totalGPUMemoryOnNode * 1024 * 1024
+	totalAvailableGPUMemoryOnNode = totalAvailableGPUMemoryOnNode * 1024 * 1024
 	totalGPUOnNode := int64(len(gpuDeviceInfo))
 
 	// TODO: Post NotReady if we cannot get MachineInfo from cAdvisor. This needs to start
@@ -3078,7 +3084,11 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 		node.Status.Capacity[api.ResourceNvidiaGPU] = *resource.NewQuantity(
 			totalGPUOnNode, resource.DecimalSI)
 		node.Status.Capacity[api.ResourceNvidiaGPUMemory] = *resource.NewQuantity(
-			totalGPUMemoryOnNode, resource.DecimalSI)
+			totalGPUMemoryOnNode, resource.BinarySI)
+		for _, info := range gpuDeviceInfo {
+			node.Status.Capacity[api.ResourceName(info.Path)] = *resource.NewQuantity(
+				info.TotalMemory*1024*1024, resource.BinarySI)
+		}
 		if node.Status.NodeInfo.BootID != "" &&
 			node.Status.NodeInfo.BootID != info.BootID {
 			// TODO: This requires a transaction, either both node status is updated
@@ -3098,6 +3108,11 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 		}
 		if kl.reservation.Kubernetes != nil {
 			value.Sub(kl.reservation.Kubernetes[k])
+		}
+		if m, has := availableMemoryPerGPU[string(k)]; has {
+			value = *resource.NewQuantity(m, resource.BinarySI)
+		} else if k == api.ResourceNvidiaGPUMemory {
+			value = *resource.NewQuantity(totalAvailableGPUMemoryOnNode, resource.BinarySI)
 		}
 		if value.Sign() < 0 {
 			// Negative Allocatable resources don't make sense.

@@ -1445,13 +1445,31 @@ func (kl *Kubelet) allocateGPUDevices(container *api.Container) ([]kubecontainer
 	if maxScoreIndex == -1 {
 		return nil, fmt.Errorf("No feasible GPU devices can be allocated for required memory %vMB", requiredMemory)
 	}
-	return []kubecontainer.DeviceInfo{
+	ret := []kubecontainer.DeviceInfo{
 		kubecontainer.DeviceInfo{
 			PathOnHost:      gpuDeviceInfo[maxScoreIndex].Path,
 			PathInContainer: gpuDeviceInfo[maxScoreIndex].Path,
 			Permissions:     "mrw",
 		},
-	}, nil
+	}
+
+	// Special case for nvidia GPU
+	if strings.Contains(ret[0].PathOnHost, "nvidia") {
+		ret = append(ret,
+			kubecontainer.DeviceInfo{
+				PathOnHost:      "/dev/nvidiactl",
+				PathInContainer: "/dev/nvidiactl",
+				Permissions:     "mrw",
+			},
+			kubecontainer.DeviceInfo{
+				PathOnHost:      "/dev/nvidia-uvm",
+				PathInContainer: "/dev/nvidia-uvm",
+				Permissions:     "mrw",
+			},
+		)
+	}
+
+	return ret, nil
 }
 
 // GenerateRunContainerOptions generates the RunContainerOptions, which can be used by
@@ -3127,7 +3145,7 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 		if kl.reservation.Kubernetes != nil {
 			value.Sub(kl.reservation.Kubernetes[k])
 		}
-		if m, has := availableMemoryPerGPU[string(k)]; has {
+		if m, has := availableMemoryPerGPU[k.String()]; has {
 			value = *resource.NewQuantity(m, resource.BinarySI)
 		} else if k == api.ResourceNvidiaGPUMemory {
 			value = *resource.NewQuantity(totalAvailableGPUMemoryOnNode, resource.BinarySI)

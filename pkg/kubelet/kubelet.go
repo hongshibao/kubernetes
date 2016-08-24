@@ -1428,12 +1428,30 @@ func (kl *Kubelet) GeneratePodHostNameAndDomain(pod *api.Pod) (string, string, e
 }
 
 func (kl *Kubelet) allocateGPUDevices(container *api.Container) ([]kubecontainer.DeviceInfo, error) {
-	_, err := kl.gpuProbe.GetGPUDeviceInfo()
+	gpuDeviceInfo, err := kl.gpuProbe.GetGPUDeviceInfo()
 	if err != nil {
 		return nil, fmt.Errorf("Error getting GPU device info: %s", err)
 	}
-	// Check memory constraint
-	return nil, nil
+	// Check GPU memory constraint, select the GPU device with most available GPU memory
+	var maxScoreIndex int = -1
+	var maxScore int64 = 0
+	requiredMemory := (container.Resources.Requests.NvidiaGPUMemory().Value() + 1024*1024 - 1) / (1024 * 1024)
+	for idx, info := range gpuDeviceInfo {
+		if info.AvailableMemory > requiredMemory && info.AvailableMemory > maxScore {
+			maxScore = info.AvailableMemory
+			maxScoreIndex = idx
+		}
+	}
+	if maxScoreIndex == -1 {
+		return nil, fmt.Errorf("No feasible GPU devices can be allocated for required memory %vMB", requiredMemory)
+	}
+	return []kubecontainer.DeviceInfo{
+		kubecontainer.DeviceInfo{
+			PathOnHost:      gpuDeviceInfo[maxScoreIndex].Path,
+			PathInContainer: gpuDeviceInfo[maxScoreIndex].Path,
+			Permissions:     "mrw",
+		},
+	}, nil
 }
 
 // GenerateRunContainerOptions generates the RunContainerOptions, which can be used by

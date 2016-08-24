@@ -60,7 +60,7 @@ func (self *ResourceList) NvidiaGPUMemory() *resource.Quantity {
 	if val, ok := (*self)[ResourceNvidiaGPUMemory]; ok {
 		return &val
 	}
-	return &resource.Quantity{}
+	return &resource.Quantity{Format: resource.BinarySI}
 }
 
 func GetContainerStatus(statuses []ContainerStatus, name string) (ContainerStatus, bool) {

@@ -43,10 +43,10 @@ type NodeInfo struct {
 
 // Resource is a collection of compute resource.
 type Resource struct {
-	MilliCPU        int64
-	Memory          int64
-	NvidiaGPU  int64
-	NvidiaGPUMemory int64
+	MilliCPU             int64
+	Memory               int64
+	NvidiaGPU            int64
+	TotalNvidiaGPUMemory int64
 }
 
 // NewNodeInfo returns a ready to use empty NodeInfo object.
@@ -121,7 +121,7 @@ func (n *NodeInfo) addPod(pod *api.Pod) {
 	n.requestedResource.MilliCPU += cpu
 	n.requestedResource.Memory += mem
 	n.requestedResource.NvidiaGPU += nvidia_gpu
-	n.requestedResource.NvidiaGPUMemory += nvidia_gpu_memory
+	n.requestedResource.TotalNvidiaGPUMemory += nvidia_gpu_memory
 	n.nonzeroRequest.MilliCPU += non0_cpu
 	n.nonzeroRequest.Memory += non0_mem
 	n.pods = append(n.pods, pod)
@@ -149,7 +149,7 @@ func (n *NodeInfo) removePod(pod *api.Pod) error {
 			n.requestedResource.MilliCPU -= cpu
 			n.requestedResource.Memory -= mem
 			n.requestedResource.NvidiaGPU -= nvidia_gpu
-			n.requestedResource.NvidiaGPUMemory -= nvidia_gpu_memory
+			n.requestedResource.TotalNvidiaGPUMemory -= nvidia_gpu_memory
 
 			n.nonzeroRequest.MilliCPU -= non0_cpu
 			n.nonzeroRequest.Memory -= non0_mem

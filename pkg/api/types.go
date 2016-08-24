@@ -2089,8 +2089,8 @@ const (
 	// Volume size, in bytes (e,g. 5Gi = 5GiB = 5 * 1024 * 1024 * 1024)
 	ResourceStorage ResourceName = "storage"
 	// NVIDIA GPU, in devices.
-	ResourceNvidiaGPU       ResourceName = "nvidia-gpu"
-	ResourceNvidiaGPUMemory ResourceName = "nvidia-gpu-memory"
+	ResourceNvidiaGPU       ResourceName = "visenze.com/nvidia-gpu"
+	ResourceNvidiaGPUMemory ResourceName = "visenze.com/nvidia-gpu-memory"
 	// Number of Pods that may be running on this Node: see ResourcePods
 )
 

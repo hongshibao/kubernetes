@@ -364,9 +364,10 @@ func (c *VolumeZoneChecker) predicate(pod *api.Pod, nodeInfo *schedulercache.Nod
 }
 
 type resourceRequest struct {
-	milliCPU  int64
-	memory    int64
-	nvidiaGPU int64
+	milliCPU        int64
+	memory          int64
+	nvidiaGPU       int64
+	nvidiaGPUMemory int64
 }
 
 func getResourceRequest(pod *api.Pod) resourceRequest {
@@ -376,6 +377,7 @@ func getResourceRequest(pod *api.Pod) resourceRequest {
 		result.memory += requests.Memory().Value()
 		result.milliCPU += requests.Cpu().MilliValue()
 		result.nvidiaGPU += requests.NvidiaGPU().Value()
+		result.nvidiaGPUMemory += requests.NvidiaGPUMemory().Value()
 	}
 	// take max_resource(sum_pod, any_init_container)
 	for _, container := range pod.Spec.InitContainers {
@@ -385,6 +387,12 @@ func getResourceRequest(pod *api.Pod) resourceRequest {
 		}
 		if cpu := requests.Cpu().MilliValue(); cpu > result.milliCPU {
 			result.milliCPU = cpu
+		}
+		if gpuMem := requests.NvidiaGPUMemory().Value(); gpuMem > result.nvidiaGPUMemory {
+			result.nvidiaGPUMemory = gpuMem
+		}
+		if gpu := requests.NvidiaGPU().Value(); gpu > result.nvidiaGPU {
+			result.nvidiaGPU = gpu
 		}
 	}
 	return result
@@ -449,6 +457,9 @@ func PodFitsResources(pod *api.Pod, nodeInfo *schedulercache.NodeInfo) (bool, er
 	totalMilliCPU := allocatable.Cpu().MilliValue()
 	totalMemory := allocatable.Memory().Value()
 	totalNvidiaGPU := allocatable.NvidiaGPU().Value()
+	// These GPU memory are current free GPU memory, which are dynamic values
+	totalNvidiaGPUMemory := allocatable.NvidiaGPUMemory().Value()
+	//memoryOfEachNvidiaGPU := allocatable.MemoryOfEachNvidiaGPU()
 
 	if totalMilliCPU < podRequest.milliCPU+nodeInfo.RequestedResource().MilliCPU {
 		return false,
@@ -461,6 +472,11 @@ func PodFitsResources(pod *api.Pod, nodeInfo *schedulercache.NodeInfo) (bool, er
 	if totalNvidiaGPU < podRequest.nvidiaGPU+nodeInfo.RequestedResource().NvidiaGPU {
 		return false,
 			newInsufficientResourceError(nvidiaGpuResourceName, podRequest.nvidiaGPU, nodeInfo.RequestedResource().NvidiaGPU, totalNvidiaGPU)
+	}
+	// Check GPU memory resource contraint
+	if totalNvidiaGPUMemory < podRequest.nvidiaGPUMemory {
+		return false,
+			newInsufficientResourceError(nvidiaGpuResourceName, podRequest.nvidiaGPUMemory, 0, totalNvidiaGPUMemory)
 	}
 	glog.V(10).Infof("Schedule Pod %+v on Node %+v is allowed, Node is running only %v out of %v Pods.",
 		podName(pod), node.Name, len(nodeInfo.Pods()), allowedPodNumber)

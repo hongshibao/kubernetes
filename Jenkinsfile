@@ -9,6 +9,7 @@ node('build') {
     sh 'git submodule update --init --recursive'
 
     stage "Build"
+    sh "./build/make-clean.sh"
     sh "./build/run.sh hack/build-go.sh"
 
     stage "Docker"

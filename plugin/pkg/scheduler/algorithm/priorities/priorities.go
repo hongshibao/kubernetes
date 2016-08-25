@@ -50,27 +50,44 @@ func calculateResourceOccupancy(pod *api.Pod, node api.Node, nodeInfo *scheduler
 	capacityMilliCPU := node.Status.Allocatable.Cpu().MilliValue()
 	capacityMemory := node.Status.Allocatable.Memory().Value()
 
+	freeNvidiaGPUMemory := node.Status.Allocatable.NvidiaGPUMemory().Value()
+	totalNvidiaGPUMemory := node.Status.Capacity.NvidiaGPUMemory().Value()
+	requestNvidiaGPUMemory := totalNvidiaGPUMemory - freeNvidiaGPUMemory
+
 	// Add the resources requested by the current pod being scheduled.
 	// This also helps differentiate between differently sized, but empty, nodes.
+	useGPU := false
 	for _, container := range pod.Spec.Containers {
 		cpu, memory := priorityutil.GetNonzeroRequests(&container.Resources.Requests)
 		totalMilliCPU += cpu
 		totalMemory += memory
+		nvidiaGPUMemory := container.Resources.Requests.NvidiaGPUMemory().Value()
+		if nvidiaGPUMemory > 0 {
+			requestNvidiaGPUMemory += nvidiaGPUMemory
+			useGPU = true
+		}
 	}
 
 	cpuScore := calculateScore(totalMilliCPU, capacityMilliCPU, node.Name)
 	memoryScore := calculateScore(totalMemory, capacityMemory, node.Name)
+
+	nvidiaGPUMemoryScore := 0
+	divisor := 2
+	if useGPU {
+		nvidiaGPUMemoryScore = calculateScore(requestNvidiaGPUMemory, totalNvidiaGPUMemory, node.Name)
+		divisor = 3
+	}
 	glog.V(10).Infof(
-		"%v -> %v: Least Requested Priority, capacity %d millicores %d memory bytes, total request %d millicores %d memory bytes, score %d CPU %d memory",
+		"%v -> %v: Least Requested Priority, capacity %d millicores %d memory bytes %d GPU memory bytes, total request %d millicores %d memory bytes %d GPU memory bytes, score %d CPU %d memory %d GPU memory",
 		pod.Name, node.Name,
-		capacityMilliCPU, capacityMemory,
-		totalMilliCPU, totalMemory,
-		cpuScore, memoryScore,
+		capacityMilliCPU, capacityMemory, totalNvidiaGPUMemory,
+		totalMilliCPU, totalMemory, requestNvidiaGPUMemory,
+		cpuScore, memoryScore, nvidiaGPUMemoryScore,
 	)
 
 	return schedulerapi.HostPriority{
 		Host:  node.Name,
-		Score: int((cpuScore + memoryScore) / 2),
+		Score: int((cpuScore + memoryScore + nvidiaGPUMemoryScore) / divisor),
 	}
 }
 

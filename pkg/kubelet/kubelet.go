@@ -3074,7 +3074,7 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 	if kl.gpuProbe != nil {
 		gpuDeviceInfo, err = kl.gpuProbe.GetGPUDeviceInfo()
 		if err != nil {
-			glog.Errorf("Error getting nvidia GPU device info: %v", err)
+			glog.Warningf("Error getting nvidia GPU device info: %v", err)
 			gpuDeviceInfo = nil
 		}
 	}

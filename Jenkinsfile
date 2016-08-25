@@ -14,9 +14,9 @@ node('build') {
     stage "Docker"
     def dockerTag = env.BRANCH_NAME.replaceAll("/", "_")
     // docker build
-	dir('cluster/images/hyperkube') {
-    	sh "make ARCH=amd64 REGISTRY=visenze VERSION=${dockerTag} build"
-	}
+    dir('cluster/images/hyperkube') {
+        sh "make ARCH=amd64 REGISTRY=visenze VERSION=${dockerTag} build"
+    }
     // docker push
     retry(10) {
         sh "docker push visenze/hyperkube-amd64:${dockerTag}"

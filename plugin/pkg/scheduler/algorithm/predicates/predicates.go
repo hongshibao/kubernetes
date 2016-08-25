@@ -450,7 +450,7 @@ func PodFitsResources(pod *api.Pod, nodeInfo *schedulercache.NodeInfo) (bool, er
 			newInsufficientResourceError(podCountResourceName, 1, int64(len(nodeInfo.Pods())), allowedPodNumber)
 	}
 	podRequest := getResourceRequest(pod)
-	if podRequest.milliCPU == 0 && podRequest.memory == 0 && podRequest.nvidiaGPU == 0 {
+	if podRequest.milliCPU == 0 && podRequest.memory == 0 && podRequest.nvidiaGPU == 0 && podRequest.nvidiaGPUMemory == 0 {
 		return true, nil
 	}
 

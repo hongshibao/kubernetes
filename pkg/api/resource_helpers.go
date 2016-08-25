@@ -69,7 +69,7 @@ func (self *ResourceList) MemoryOfEachNvidiaGPU() []*resource.Quantity {
 	ret := make([]*resource.Quantity, 0)
 	for k, v := range *self {
 		if strings.HasPrefix(k.String(), "/dev/nvidia") {
-			ret = append(ret, &v)
+			ret = append(ret, v.Copy())
 		}
 	}
 	return ret

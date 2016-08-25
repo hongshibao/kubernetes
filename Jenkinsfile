@@ -7,10 +7,6 @@ node('build') {
     checkout scm
     // git update submodules
     sh 'git submodule update --init --recursive'
-    // update basebox
-    retry(10) {
-        sh "docker pull visenze/golang:1.6"
-    }
 
     stage "Build"
     sh "./build/run.sh hack/build-go.sh"

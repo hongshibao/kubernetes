@@ -309,10 +309,12 @@ func NewMainKubelet(
 		flannelExperimentalOverlay = false
 	}
 
+	var gpuProbe gputypes.GPUProbe
 	nvidiaGPUProbe, err := gpunvidia.NewNvidiaGPU()
-	if err != nil {
+	if err == nil {
+		gpuProbe = nvidiaGPUProbe
+	} else {
 		glog.Errorf("Error creating nvidia GPU probe: %s", err)
-		nvidiaGPUProbe = nil
 	}
 
 	klet := &Kubelet{
@@ -353,7 +355,7 @@ func NewMainKubelet(
 		reconcileCIDR:              reconcileCIDR,
 		maxPods:                    maxPods,
 		podsPerCore:                podsPerCore,
-		gpuProbe:                   nvidiaGPUProbe,
+		gpuProbe:                   gpuProbe,
 		syncLoopMonitor:            atomic.Value{},
 		resolverConfig:             resolverConfig,
 		cpuCFSQuota:                cpuCFSQuota,
@@ -1428,9 +1430,13 @@ func (kl *Kubelet) GeneratePodHostNameAndDomain(pod *api.Pod) (string, string, e
 }
 
 func (kl *Kubelet) allocateGPUDevices(container *api.Container) ([]kubecontainer.DeviceInfo, error) {
-	gpuDeviceInfo, err := kl.gpuProbe.GetGPUDeviceInfo()
-	if err != nil {
-		return nil, fmt.Errorf("Error getting GPU device info: %s", err)
+	var gpuDeviceInfo []gputypes.GPUDeviceInfo
+	var err error
+	if kl.gpuProbe != nil {
+		gpuDeviceInfo, err = kl.gpuProbe.GetGPUDeviceInfo()
+		if err != nil {
+			return nil, fmt.Errorf("Error getting GPU device info: %s", err)
+		}
 	}
 	// Check GPU memory constraint, select the GPU device with most available GPU memory
 	var maxScoreIndex int = -1

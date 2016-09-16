@@ -10,7 +10,7 @@ node('build') {
 
     stage "Build"
     sh "./build/make-clean.sh"
-    sh "./build/run.sh hack/build-go.sh"
+    sh "./build/run.sh make"
 
     stage "Docker"
     def dockerTag = env.BRANCH_NAME.replaceAll("/", "_")

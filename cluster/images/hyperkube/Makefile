@@ -60,8 +60,8 @@ endif
 	# Singlenode addons
 	cp ../../addons/dns/skydns-rc.yaml.base ${TEMP_DIR}/addons/singlenode/skydns-rc.yaml
 	cp ../../addons/dns/skydns-svc.yaml.base ${TEMP_DIR}/addons/singlenode/skydns-svc.yaml
-	cp ../../addons/dashboard/dashboard-controller.yaml ${TEMP_DIR}/addons/singlenode/
-	cp ../../addons/dashboard/dashboard-service.yaml ${TEMP_DIR}/addons/singlenode/
+	# cp ../../addons/dashboard/dashboard-controller.yaml ${TEMP_DIR}/addons/singlenode/
+	# cp ../../addons/dashboard/dashboard-service.yaml ${TEMP_DIR}/addons/singlenode/
 
 	# Multinode addons; all singlenode addons plus kube-proxy (and soon flannel)
 	cp ${TEMP_DIR}/addons/singlenode/*.yaml ${TEMP_DIR}/addons/multinode/

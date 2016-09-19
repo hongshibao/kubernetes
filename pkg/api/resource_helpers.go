@@ -17,6 +17,8 @@ limitations under the License.
 package api
 
 import (
+	"strings"
+
 	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 )
@@ -54,6 +56,23 @@ func (self *ResourceList) NvidiaGPU() *resource.Quantity {
 		return &val
 	}
 	return &resource.Quantity{}
+}
+
+func (self *ResourceList) NvidiaGPUMemory() *resource.Quantity {
+	if val, ok := (*self)[ResourceNvidiaGPUMemory]; ok {
+		return &val
+	}
+	return &resource.Quantity{Format: resource.BinarySI}
+}
+
+func (self *ResourceList) MemoryOfEachNvidiaGPU() []*resource.Quantity {
+	ret := make([]*resource.Quantity, 0)
+	for k, v := range *self {
+		if strings.HasPrefix(k.String(), "/dev/nvidia") {
+			ret = append(ret, v.Copy())
+		}
+	}
+	return ret
 }
 
 func GetContainerStatus(statuses []ContainerStatus, name string) (ContainerStatus, bool) {

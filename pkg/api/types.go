@@ -2257,8 +2257,9 @@ const (
 	ResourceMemory ResourceName = "memory"
 	// Volume size, in bytes (e,g. 5Gi = 5GiB = 5 * 1024 * 1024 * 1024)
 	ResourceStorage ResourceName = "storage"
-	// NVIDIA GPU, in devices. Alpha, might change: although fractional and allowing values >1, only one whole device per node is assigned.
-	ResourceNvidiaGPU ResourceName = "alpha.kubernetes.io/nvidia-gpu"
+	// NVIDIA GPU, in devices.
+	ResourceNvidiaGPU       ResourceName = "visenze.com/nvidia-gpu"
+	ResourceNvidiaGPUMemory ResourceName = "visenze.com/nvidia-gpu-memory"
 	// Number of Pods that may be running on this Node: see ResourcePods
 )
 

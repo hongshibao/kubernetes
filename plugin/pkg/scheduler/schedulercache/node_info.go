@@ -55,9 +55,10 @@ type NodeInfo struct {
 
 // Resource is a collection of compute resource.
 type Resource struct {
-	MilliCPU  int64
-	Memory    int64
-	NvidiaGPU int64
+	MilliCPU             int64
+	Memory               int64
+	NvidiaGPU            int64
+	TotalNvidiaGPUMemory int64
 }
 
 // NewNodeInfo returns a ready to use empty NodeInfo object.
@@ -169,10 +170,13 @@ func hasPodAffinityConstraints(pod *api.Pod) bool {
 
 // addPod adds pod information to this NodeInfo.
 func (n *NodeInfo) addPod(pod *api.Pod) {
-	cpu, mem, nvidia_gpu, non0_cpu, non0_mem := calculateResource(pod)
+	cpu, mem, nvidia_gpu, nvidia_gpu_memory, non0_cpu, non0_mem := calculateResource(pod)
 	n.requestedResource.MilliCPU += cpu
 	n.requestedResource.Memory += mem
 	n.requestedResource.NvidiaGPU += nvidia_gpu
+	n.requestedResource.TotalNvidiaGPUMemory += nvidia_gpu_memory
+	n.nonzeroRequest.NvidiaGPU += nvidia_gpu
+	n.nonzeroRequest.TotalNvidiaGPUMemory += nvidia_gpu_memory
 	n.nonzeroRequest.MilliCPU += non0_cpu
 	n.nonzeroRequest.Memory += non0_mem
 	n.pods = append(n.pods, pod)
@@ -213,10 +217,13 @@ func (n *NodeInfo) removePod(pod *api.Pod) error {
 			n.pods[i] = n.pods[len(n.pods)-1]
 			n.pods = n.pods[:len(n.pods)-1]
 			// reduce the resource data
-			cpu, mem, nvidia_gpu, non0_cpu, non0_mem := calculateResource(pod)
+			cpu, mem, nvidia_gpu, nvidia_gpu_memory, non0_cpu, non0_mem := calculateResource(pod)
 			n.requestedResource.MilliCPU -= cpu
 			n.requestedResource.Memory -= mem
 			n.requestedResource.NvidiaGPU -= nvidia_gpu
+			n.requestedResource.TotalNvidiaGPUMemory -= nvidia_gpu_memory
+			n.nonzeroRequest.NvidiaGPU -= nvidia_gpu
+			n.nonzeroRequest.TotalNvidiaGPUMemory -= nvidia_gpu_memory
 			n.nonzeroRequest.MilliCPU -= non0_cpu
 			n.nonzeroRequest.Memory -= non0_mem
 			n.generation++
@@ -226,12 +233,14 @@ func (n *NodeInfo) removePod(pod *api.Pod) error {
 	return fmt.Errorf("no corresponding pod %s in pods of node %s", pod.Name, n.node.Name)
 }
 
-func calculateResource(pod *api.Pod) (cpu int64, mem int64, nvidia_gpu int64, non0_cpu int64, non0_mem int64) {
+func calculateResource(pod *api.Pod) (cpu int64, mem int64,
+	nvidia_gpu int64, nvidia_gpu_memory int64, non0_cpu int64, non0_mem int64) {
 	for _, c := range pod.Spec.Containers {
 		req := c.Resources.Requests
 		cpu += req.Cpu().MilliValue()
 		mem += req.Memory().Value()
 		nvidia_gpu += req.NvidiaGPU().Value()
+		nvidia_gpu_memory += req.NvidiaGPUMemory().Value()
 
 		non0_cpu_req, non0_mem_req := priorityutil.GetNonzeroRequests(&req)
 		non0_cpu += non0_cpu_req

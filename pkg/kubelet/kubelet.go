@@ -55,6 +55,8 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/envvars"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/eviction"
+	gpunvidia "k8s.io/kubernetes/pkg/kubelet/gpu/nvidia"
+	gputypes "k8s.io/kubernetes/pkg/kubelet/gpu/types"
 	"k8s.io/kubernetes/pkg/kubelet/images"
 	"k8s.io/kubernetes/pkg/kubelet/kuberuntime"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
@@ -435,6 +437,14 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 		myFlannelExperimentalOverlay = false
 	}
 
+	var gpuProbe gputypes.GPUProbe
+	nvidiaGPUProbe, err := gpunvidia.NewNvidiaGPU()
+	if err == nil {
+		gpuProbe = nvidiaGPUProbe
+	} else {
+		glog.Errorf("Error creating nvidia GPU probe: %s", err)
+	}
+
 	klet := &Kubelet{
 		hostname:                       hostname,
 		nodeName:                       nodeName,
@@ -474,7 +484,7 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 		reconcileCIDR:              kubeCfg.ReconcileCIDR,
 		maxPods:                    int(kubeCfg.MaxPods),
 		podsPerCore:                int(kubeCfg.PodsPerCore),
-		nvidiaGPUs:                 int(kubeCfg.NvidiaGPUs),
+		gpuProbe:                   gpuProbe,
 		syncLoopMonitor:            atomic.Value{},
 		resolverConfig:             kubeCfg.ResolverConfig,
 		cpuCFSQuota:                kubeCfg.CPUCFSQuota,
@@ -941,8 +951,8 @@ type Kubelet struct {
 	// Maximum Number of Pods which can be run by this Kubelet
 	maxPods int
 
-	// Number of NVIDIA GPUs on this node
-	nvidiaGPUs int
+	// To probe GPUs on this node
+	gpuProbe gputypes.GPUProbe
 
 	// Monitor Kubelet's sync loop
 	syncLoopMonitor atomic.Value
@@ -1364,6 +1374,55 @@ func (kl *Kubelet) GeneratePodHostNameAndDomain(pod *api.Pod) (string, string, e
 	return hostname, hostDomain, nil
 }
 
+func (kl *Kubelet) allocateGPUDevices(container *api.Container) ([]kubecontainer.DeviceInfo, error) {
+	var gpuDeviceInfo []gputypes.GPUDeviceInfo
+	var err error
+	if kl.gpuProbe != nil {
+		gpuDeviceInfo, err = kl.gpuProbe.GetGPUDeviceInfo()
+		if err != nil {
+			return nil, fmt.Errorf("Error getting GPU device info: %s", err)
+		}
+	}
+	// Check GPU memory constraint, select the GPU device with most available GPU memory
+	var maxScoreIndex int = -1
+	var maxScore int64 = 0
+	requiredMemory := (container.Resources.Requests.NvidiaGPUMemory().Value() + 1024*1024 - 1) / (1024 * 1024)
+	for idx, info := range gpuDeviceInfo {
+		if info.AvailableMemory > requiredMemory && info.AvailableMemory > maxScore {
+			maxScore = info.AvailableMemory
+			maxScoreIndex = idx
+		}
+	}
+	if maxScoreIndex == -1 {
+		return nil, fmt.Errorf("No feasible GPU devices can be allocated for required memory %vMB", requiredMemory)
+	}
+	ret := []kubecontainer.DeviceInfo{
+		kubecontainer.DeviceInfo{
+			PathOnHost:      gpuDeviceInfo[maxScoreIndex].Path,
+			PathInContainer: gpuDeviceInfo[maxScoreIndex].Path,
+			Permissions:     "mrw",
+		},
+	}
+
+	// Special case for nvidia GPU
+	if strings.Contains(ret[0].PathOnHost, "nvidia") {
+		ret = append(ret,
+			kubecontainer.DeviceInfo{
+				PathOnHost:      "/dev/nvidiactl",
+				PathInContainer: "/dev/nvidiactl",
+				Permissions:     "mrw",
+			},
+			kubecontainer.DeviceInfo{
+				PathOnHost:      "/dev/nvidia-uvm",
+				PathInContainer: "/dev/nvidia-uvm",
+				Permissions:     "mrw",
+			},
+		)
+	}
+
+	return ret, nil
+}
+
 // GenerateRunContainerOptions generates the RunContainerOptions, which can be used by
 // the container runtime to set parameters for launching a container.
 func (kl *Kubelet) GenerateRunContainerOptions(pod *api.Pod, container *api.Container, podIP string) (*kubecontainer.RunContainerOptions, error) {
@@ -1409,6 +1468,14 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *api.Pod, container *api.Cont
 	opts.DNS, opts.DNSSearch, err = kl.GetClusterDNS(pod)
 	if err != nil {
 		return nil, err
+	}
+
+	// Allocate GPU devices
+	if container.Resources.Requests.NvidiaGPUMemory().Value() > 0 {
+		opts.Devices, err = kl.allocateGPUDevices(container)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return opts, nil

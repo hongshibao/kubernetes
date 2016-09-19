@@ -424,6 +424,7 @@ func getResourceRequest(pod *api.Pod) *schedulercache.Resource {
 		result.Memory += requests.Memory().Value()
 		result.MilliCPU += requests.Cpu().MilliValue()
 		result.NvidiaGPU += requests.NvidiaGPU().Value()
+		result.TotalNvidiaGPUMemory += requests.NvidiaGPUMemory().Value()
 	}
 	// take max_resource(sum_pod, any_init_container)
 	for _, container := range pod.Spec.InitContainers {
@@ -433,6 +434,12 @@ func getResourceRequest(pod *api.Pod) *schedulercache.Resource {
 		}
 		if cpu := requests.Cpu().MilliValue(); cpu > result.MilliCPU {
 			result.MilliCPU = cpu
+		}
+		if gpuMem := requests.NvidiaGPUMemory().Value(); gpuMem > result.TotalNvidiaGPUMemory {
+			result.TotalNvidiaGPUMemory = gpuMem
+		}
+		if gpu := requests.NvidiaGPU().Value(); gpu > result.NvidiaGPU {
+			result.NvidiaGPU = gpu
 		}
 	}
 	return &result
@@ -461,11 +468,14 @@ func PodFitsResources(pod *api.Pod, meta interface{}, nodeInfo *schedulercache.N
 		// We couldn't parse metadata - fallback to computing it.
 		podRequest = getResourceRequest(pod)
 	}
-	if podRequest.MilliCPU == 0 && podRequest.Memory == 0 && podRequest.NvidiaGPU == 0 {
+	if podRequest.MilliCPU == 0 && podRequest.Memory == 0 && podRequest.NvidiaGPU == 0 && podRequest.TotalNvidiaGPUMemory == 0 {
 		return len(predicateFails) == 0, predicateFails, nil
 	}
 
 	allocatable := nodeInfo.AllocatableResource()
+	// These GPU memory are current free GPU memory, which are dynamic values
+	memoryOfEachNvidiaGPU := node.Status.Allocatable.MemoryOfEachNvidiaGPU()
+
 	if allocatable.MilliCPU < podRequest.MilliCPU+nodeInfo.RequestedResource().MilliCPU {
 		predicateFails = append(predicateFails, NewInsufficientResourceError(api.ResourceCPU, podRequest.MilliCPU, nodeInfo.RequestedResource().MilliCPU, allocatable.MilliCPU))
 	}
@@ -474,6 +484,20 @@ func PodFitsResources(pod *api.Pod, meta interface{}, nodeInfo *schedulercache.N
 	}
 	if allocatable.NvidiaGPU < podRequest.NvidiaGPU+nodeInfo.RequestedResource().NvidiaGPU {
 		predicateFails = append(predicateFails, NewInsufficientResourceError(api.ResourceNvidiaGPU, podRequest.NvidiaGPU, nodeInfo.RequestedResource().NvidiaGPU, allocatable.NvidiaGPU))
+	}
+	// Assume allocate all containers in this pod to the same GPU
+	// Choose the GPU with most GPU memory to assign
+	// TODO handle multiple containers in one pod with better strategies
+	var maxMemInt64 int64
+	for _, mem := range memoryOfEachNvidiaGPU {
+		memInt64 := (*mem).Value()
+		if memInt64 > maxMemInt64 {
+			maxMemInt64 = memInt64
+		}
+	}
+	if maxMemInt64 < podRequest.TotalNvidiaGPUMemory {
+		predicateFails = append(predicateFails,
+			NewInsufficientResourceError(api.ResourceNvidiaGPUMemory, podRequest.TotalNvidiaGPUMemory, 0, maxMemInt64))
 	}
 	if glog.V(10) {
 		// We explicitly don't do glog.V(10).Infof() to avoid computing all the parameters if this is

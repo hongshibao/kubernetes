@@ -56,17 +56,19 @@ type NodeInfo struct {
 
 // Resource is a collection of compute resource.
 type Resource struct {
-	MilliCPU           int64
-	Memory             int64
-	NvidiaGPU          int64
-	OpaqueIntResources map[api.ResourceName]int64
+	MilliCPU             int64
+	Memory               int64
+	NvidiaGPU            int64
+	TotalNvidiaGPUMemory int64
+	OpaqueIntResources   map[api.ResourceName]int64
 }
 
 func (r *Resource) ResourceList() api.ResourceList {
 	result := api.ResourceList{
-		api.ResourceCPU:       *resource.NewMilliQuantity(r.MilliCPU, resource.DecimalSI),
-		api.ResourceMemory:    *resource.NewQuantity(r.Memory, resource.BinarySI),
-		api.ResourceNvidiaGPU: *resource.NewQuantity(r.NvidiaGPU, resource.DecimalSI),
+		api.ResourceCPU:             *resource.NewMilliQuantity(r.MilliCPU, resource.DecimalSI),
+		api.ResourceMemory:          *resource.NewQuantity(r.Memory, resource.BinarySI),
+		api.ResourceNvidiaGPU:       *resource.NewQuantity(r.NvidiaGPU, resource.DecimalSI),
+		api.ResourceNvidiaGPUMemory: *resource.NewQuantity(r.TotalNvidiaGPUMemory, resource.BinarySI),
 	}
 	for rName, rQuant := range r.OpaqueIntResources {
 		result[rName] = *resource.NewQuantity(rQuant, resource.DecimalSI)
@@ -188,6 +190,7 @@ func (n *NodeInfo) addPod(pod *api.Pod) {
 	n.requestedResource.MilliCPU += res.MilliCPU
 	n.requestedResource.Memory += res.Memory
 	n.requestedResource.NvidiaGPU += res.NvidiaGPU
+	n.requestedResource.TotalNvidiaGPUMemory += res.TotalNvidiaGPUMemory
 	if n.requestedResource.OpaqueIntResources == nil && len(res.OpaqueIntResources) > 0 {
 		n.requestedResource.OpaqueIntResources = map[api.ResourceName]int64{}
 	}
@@ -196,6 +199,8 @@ func (n *NodeInfo) addPod(pod *api.Pod) {
 	}
 	n.nonzeroRequest.MilliCPU += non0_cpu
 	n.nonzeroRequest.Memory += non0_mem
+	n.nonzeroRequest.NvidiaGPU += res.NvidiaGPU
+	n.nonzeroRequest.TotalNvidiaGPUMemory += res.TotalNvidiaGPUMemory
 	n.pods = append(n.pods, pod)
 	if hasPodAffinityConstraints(pod) {
 		n.podsWithAffinity = append(n.podsWithAffinity, pod)
@@ -239,6 +244,7 @@ func (n *NodeInfo) removePod(pod *api.Pod) error {
 			n.requestedResource.MilliCPU -= res.MilliCPU
 			n.requestedResource.Memory -= res.Memory
 			n.requestedResource.NvidiaGPU -= res.NvidiaGPU
+			n.requestedResource.TotalNvidiaGPUMemory -= res.TotalNvidiaGPUMemory
 			if len(res.OpaqueIntResources) > 0 && n.requestedResource.OpaqueIntResources == nil {
 				n.requestedResource.OpaqueIntResources = map[api.ResourceName]int64{}
 			}
@@ -247,6 +253,8 @@ func (n *NodeInfo) removePod(pod *api.Pod) error {
 			}
 			n.nonzeroRequest.MilliCPU -= non0_cpu
 			n.nonzeroRequest.Memory -= non0_mem
+			n.nonzeroRequest.NvidiaGPU -= res.NvidiaGPU
+			n.nonzeroRequest.TotalNvidiaGPUMemory -= res.TotalNvidiaGPUMemory
 			n.generation++
 			return nil
 		}
@@ -264,6 +272,8 @@ func calculateResource(pod *api.Pod) (res Resource, non0_cpu int64, non0_mem int
 				res.Memory += rQuant.Value()
 			case api.ResourceNvidiaGPU:
 				res.NvidiaGPU += rQuant.Value()
+			case api.ResourceNvidiaGPUMemory:
+				res.TotalNvidiaGPUMemory += rQuant.Value()
 			default:
 				if api.IsOpaqueIntResourceName(rName) {
 					// Lazily allocate opaque resource map.
@@ -294,6 +304,8 @@ func (n *NodeInfo) SetNode(node *api.Node) error {
 			n.allocatableResource.Memory = rQuant.Value()
 		case api.ResourceNvidiaGPU:
 			n.allocatableResource.NvidiaGPU = rQuant.Value()
+		case api.ResourceNvidiaGPUMemory:
+			n.allocatableResource.TotalNvidiaGPUMemory = rQuant.Value()
 		case api.ResourcePods:
 			n.allowedPodNumber = int(rQuant.Value())
 		default:

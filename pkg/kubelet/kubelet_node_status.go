@@ -34,6 +34,7 @@ import (
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
 	"k8s.io/kubernetes/pkg/kubelet/events"
+	gputypes "k8s.io/kubernetes/pkg/kubelet/gpu/types"
 	"k8s.io/kubernetes/pkg/kubelet/util/sliceutils"
 	utilnet "k8s.io/kubernetes/pkg/util/net"
 	"k8s.io/kubernetes/pkg/version"
@@ -454,6 +455,30 @@ func (kl *Kubelet) setNodeAddress(node *api.Node) error {
 }
 
 func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
+	// Get nvidia GPU devices info
+	var gpuDeviceInfo []gputypes.GPUDeviceInfo
+	var err error
+	if kl.gpuProbe != nil {
+		gpuDeviceInfo, err = kl.gpuProbe.GetBufferedGPUDeviceInfo()
+		if err != nil {
+			glog.Warningf("Error getting nvidia GPU device info: %v", err)
+			gpuDeviceInfo = nil
+		}
+	}
+	availableMemoryPerGPU := make(map[string]int64)
+	var totalGPUMemoryOnNode int64
+	var totalAvailableGPUMemoryOnNode int64
+	for _, info := range gpuDeviceInfo {
+		totalGPUMemoryOnNode += info.TotalMemory
+		totalAvailableGPUMemoryOnNode += info.AvailableMemory
+		// unit from MB to B
+		availableMemoryPerGPU[info.Path] = info.AvailableMemory * 1024 * 1024
+	}
+	// unit from MB to B
+	totalGPUMemoryOnNode = totalGPUMemoryOnNode * 1024 * 1024
+	totalAvailableGPUMemoryOnNode = totalAvailableGPUMemoryOnNode * 1024 * 1024
+	totalGPUOnNode := int64(len(gpuDeviceInfo))
+
 	// Note: avoid blindly overwriting the capacity in case opaque
 	//       resources are being advertised.
 	if node.Status.Capacity == nil {
@@ -469,7 +494,8 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 		node.Status.Capacity[api.ResourceCPU] = *resource.NewMilliQuantity(0, resource.DecimalSI)
 		node.Status.Capacity[api.ResourceMemory] = resource.MustParse("0Gi")
 		node.Status.Capacity[api.ResourcePods] = *resource.NewQuantity(int64(kl.maxPods), resource.DecimalSI)
-		node.Status.Capacity[api.ResourceNvidiaGPU] = *resource.NewQuantity(int64(kl.nvidiaGPUs), resource.DecimalSI)
+		node.Status.Capacity[api.ResourceNvidiaGPU] = *resource.NewQuantity(totalGPUOnNode, resource.DecimalSI)
+		node.Status.Capacity[api.ResourceNvidiaGPUMemory] = *resource.NewQuantity(totalGPUMemoryOnNode, resource.BinarySI)
 
 		glog.Errorf("Error getting machine info: %v", err)
 	} else {
@@ -488,7 +514,13 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 				int64(kl.maxPods), resource.DecimalSI)
 		}
 		node.Status.Capacity[api.ResourceNvidiaGPU] = *resource.NewQuantity(
-			int64(kl.nvidiaGPUs), resource.DecimalSI)
+			totalGPUOnNode, resource.DecimalSI)
+		node.Status.Capacity[api.ResourceNvidiaGPUMemory] = *resource.NewQuantity(
+			totalGPUMemoryOnNode, resource.BinarySI)
+		for _, info := range gpuDeviceInfo {
+			node.Status.Capacity[api.ResourceName(info.Path)] = *resource.NewQuantity(
+				info.TotalMemory*1024*1024, resource.BinarySI)
+		}
 		if node.Status.NodeInfo.BootID != "" &&
 			node.Status.NodeInfo.BootID != info.BootID {
 			// TODO: This requires a transaction, either both node status is updated
@@ -508,6 +540,11 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 		}
 		if kl.reservation.Kubernetes != nil {
 			value.Sub(kl.reservation.Kubernetes[k])
+		}
+		if m, has := availableMemoryPerGPU[k.String()]; has {
+			value = *resource.NewQuantity(m, resource.BinarySI)
+		} else if k == api.ResourceNvidiaGPUMemory {
+			value = *resource.NewQuantity(totalAvailableGPUMemoryOnNode, resource.BinarySI)
 		}
 		if value.Sign() < 0 {
 			// Negative Allocatable resources don't make sense.

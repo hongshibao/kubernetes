@@ -70,22 +70,38 @@ func calculateUnusedPriority(pod *api.Pod, podRequests *schedulercache.Resource,
 	totalResources.MilliCPU += nodeInfo.NonZeroRequest().MilliCPU
 	totalResources.Memory += nodeInfo.NonZeroRequest().Memory
 
+	freeNvidiaGPUMemory := allocatableResources.TotalNvidiaGPUMemory
+	totalNvidiaGPUMemory := node.Status.Capacity.NvidiaGPUMemory().Value()
+	requestNvidiaGPUMemory := totalNvidiaGPUMemory - freeNvidiaGPUMemory + podRequests.TotalNvidiaGPUMemory
+
 	cpuScore := calculateUnusedScore(totalResources.MilliCPU, allocatableResources.MilliCPU, node.Name)
 	memoryScore := calculateUnusedScore(totalResources.Memory, allocatableResources.Memory, node.Name)
+
+	useGPU := false
+	if podRequests.TotalNvidiaGPUMemory > 0 {
+		useGPU = true
+	}
+	var nvidiaGPUMemoryScore int64
+	var divisor int64 = 2
+	if useGPU {
+		nvidiaGPUMemoryScore = calculateUnusedScore(requestNvidiaGPUMemory, totalNvidiaGPUMemory, node.Name)
+		divisor = 3
+	}
+
 	if glog.V(10) {
 		// We explicitly don't do glog.V(10).Infof() to avoid computing all the parameters if this is
 		// not logged. There is visible performance gain from it.
 		glog.V(10).Infof(
-			"%v -> %v: Least Requested Priority, capacity %d millicores %d memory bytes, total request %d millicores %d memory bytes, score %d CPU %d memory",
+			"%v -> %v: Least Requested Priority, capacity %d millicores %d memory bytes %d GPU memory bytes, total request %d millicores %d memory bytes %d GPU memory bytes, score %d CPU %d memory %d GPU memory",
 			pod.Name, node.Name,
-			allocatableResources.MilliCPU, allocatableResources.Memory,
-			totalResources.MilliCPU, totalResources.Memory,
-			cpuScore, memoryScore,
+			allocatableResources.MilliCPU, allocatableResources.Memory, totalNvidiaGPUMemory,
+			totalResources.MilliCPU, totalResources.Memory, requestNvidiaGPUMemory,
+			cpuScore, memoryScore, nvidiaGPUMemoryScore,
 		)
 	}
 
 	return schedulerapi.HostPriority{
 		Host:  node.Name,
-		Score: int((cpuScore + memoryScore) / 2),
+		Score: int((cpuScore + memoryScore + nvidiaGPUMemoryScore) / divisor),
 	}, nil
 }

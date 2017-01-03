@@ -50,6 +50,8 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/dockertools"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/eviction"
+	gpunvidia "k8s.io/kubernetes/pkg/kubelet/gpu/nvidia"
+	gputypes "k8s.io/kubernetes/pkg/kubelet/gpu/types"
 	"k8s.io/kubernetes/pkg/kubelet/images"
 	"k8s.io/kubernetes/pkg/kubelet/kuberuntime"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
@@ -406,6 +408,14 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 
 	oomWatcher := NewOOMWatcher(kubeDeps.CAdvisorInterface, kubeDeps.Recorder)
 
+	var gpuProbe gputypes.GPUProbe
+	nvidiaGPUProbe, err := gpunvidia.NewNvidiaGPU()
+	if err == nil {
+		gpuProbe = nvidiaGPUProbe
+	} else {
+		glog.Errorf("Error creating nvidia GPU probe: %s", err)
+	}
+
 	klet := &Kubelet{
 		hostname:                       hostname,
 		nodeName:                       nodeName,
@@ -443,7 +453,7 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 		nonMasqueradeCIDR: kubeCfg.NonMasqueradeCIDR,
 		maxPods:           int(kubeCfg.MaxPods),
 		podsPerCore:       int(kubeCfg.PodsPerCore),
-		nvidiaGPUs:        int(kubeCfg.NvidiaGPUs),
+		gpuProbe:          gpuProbe,
 		syncLoopMonitor:   atomic.Value{},
 		resolverConfig:    kubeCfg.ResolverConfig,
 		cpuCFSQuota:       kubeCfg.CPUCFSQuota,
@@ -988,8 +998,8 @@ type Kubelet struct {
 	// Maximum Number of Pods which can be run by this Kubelet
 	maxPods int
 
-	// Number of NVIDIA GPUs on this node
-	nvidiaGPUs int
+	// To probe GPUs on this node
+	gpuProbe gputypes.GPUProbe
 
 	// Monitor Kubelet's sync loop
 	syncLoopMonitor atomic.Value
